@@ -26,7 +26,7 @@ USE_DSPY = False
 
 # Initialize DSPy model
 try:
-    lm = dspy.LM(model="openai/gpt-4", api_key=OPENAI_API_KEY)
+    lm = dspy.LM(model="openai/gpt-4o-mini", api_key=OPENAI_API_KEY)
     dspy.configure(lm=lm)
     USE_DSPY = True
 except Exception:
@@ -57,7 +57,7 @@ def dsp_financial_insight(ticker: str, stock_data: Dict) -> str:
         # Option 1: DSPy-based Analysis (Preferred)
         if USE_DSPY:
             try:
-                predictor = dspy.Predict("input_text -> analysis_text", llm=lm)
+                predictor = dspy.Predict("input_text -> analysis_text")
                 result = predictor(input_text=prompt)
                 return getattr(result, "analysis_text", str(result))
             except Exception:
@@ -66,7 +66,7 @@ def dsp_financial_insight(ticker: str, stock_data: Dict) -> str:
         if client and OPENAI_API_KEY:
             try:
                 response = client.chat.completions.create(
-                    model="gpt-5-nano",
+                    model="gpt-4o-mini",
                     messages=[
                         {"role": "system", "content": "You are a helpful financial analyst."},
                         {"role": "user", "content": prompt},
