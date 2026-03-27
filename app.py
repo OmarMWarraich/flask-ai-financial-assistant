@@ -10,6 +10,9 @@ import pandas as pd
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
+from models import Holding, AnalysisHistory
+from utils import get_stock_data, history_to_dataframe
+
 # ---------------------------------------------------------------------
 # Tasks 2, 3, and 4: Add Local Imports
 # ---------------------------------------------------------------------
