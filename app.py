@@ -123,16 +123,185 @@ def history_page():
 # Task 6: Implement DSPy Stock Analysis and Insight Summary Routes
 # ---------------------------------------------------------------------
 
+@app.route("/api/analyze", methods=["POST"])
+def api_analyze():
+    """
+    Analyze a stock using DSPy and return financial insights.
+    """
+    try:
+        data = request.get_json(force=True)
+        ticker = data.get("ticker", "").strip().upper()
+
+        if not ticker:
+            return jsonify({"error": "Ticker required"}), 400
+
+        stock_data = get_stock_data(ticker)
+        if not stock_data:
+            return jsonify({"error": f"No data found for {ticker}"}), 404
+
+        # Generate DSPy insight
+        insight = dsp_financial_insight(ticker, stock_data)
+
+        # Store in session for summary page
+        session["latest_insight"] = {
+            "ticker": ticker,
+            "company": stock_data.get("company", "N/A"),
+            "price": stock_data.get("price", "N/A"),
+            "change_pct": stock_data.get("change_pct", "N/A"),
+            "pe_ratio": stock_data.get("pe_ratio", "N/A"),
+            "beta": stock_data.get("beta", "N/A"),
+            "insight": insight
+        }
+
+        return jsonify({"status": "ok", "stock": stock_data, "insight": insight})
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/insight_summary")
+def insight_summary():
+    insight_data = session.get("latest_insight")
+    if not insight_data:
+        return render_template("error.html", message="No DSPy insight found. Please analyze a stock first.")
+    formatted_text = markdown.markdown(insight_data["insight"])
+    insight_data["insight"] = formatted_text
+    return render_template("insight_summary.html", insight=insight_data)
 
 # ---------------------------------------------------------------------
 # Task 7: Implement Portfolio Management Routes
 # ---------------------------------------------------------------------
 
+@app.route("/api/portfolio", methods=["POST"])
+def portfolio_api():
+    """
+    Add or update holdings in the portfolio.
+    """
+    try:
+        data = request.get_json(force=True)
+        ticker = data.get("ticker", "").strip().upper()
+        qty = float(data.get("quantity", 0))
+
+        if not ticker or qty <= 0:
+            return jsonify({"error": "Valid ticker and positive quantity required"}), 400
+
+        holding = Holding.query.filter_by(ticker=ticker).first()
+        if holding:
+            holding.quantity += qty
+        else:
+            holding = Holding()
+            holding.ticker = ticker
+            holding.quantity = qty
+            db.session.add(holding)
+
+        db.session.commit()
+        return jsonify({"ok": True, "ticker": ticker, "quantity": holding.quantity})
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": "Failed to update portfolio", "details": str(e)}), 500
+
+
+@app.route("/api/portfolio/delete", methods=["POST"])
+def portfolio_delete():
+    """
+    Delete a holding from the user's portfolio.
+    """
+    try:
+        data = request.get_json(force=True)
+        ticker = data.get("ticker", "").strip().upper()
+
+        if not ticker:
+            return jsonify({"error": "Ticker required"}), 400
+
+        holding = Holding.query.filter_by(ticker=ticker).first()
+        if not holding:
+            return jsonify({"error": f"No record found for {ticker}"}), 404
+
+        db.session.delete(holding)
+        db.session.commit()
+        return jsonify({"ok": True})
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": "Failed to delete", "details": str(e)}), 500
 
 # ---------------------------------------------------------------------
 # Task 8: Implement Portfolio PDF Report Generation Route
 # ---------------------------------------------------------------------
 
+@app.route("/report/portfolio.pdf")
+def portfolio_report():
+    """
+    Generate and download a portfolio report as a PDF.
+    Displays 'N/A' for missing prices but calculates totals correctly.
+    """
+    try:
+        holdings = Holding.query.order_by(Holding.ticker).all()
+        total_value = 0.0
+        items = []
+
+        for h in holdings:
+            try:
+                data = get_stock_data(h.ticker)
+            except Exception as e:
+                print(f"[portfolio_report] Error fetching {h.ticker}: {e}")
+                data = {"price": None}
+
+            price = data.get("price")
+            qty = h.quantity
+            is_valid_price = isinstance(price, (float, int)) and price > 0
+
+            if is_valid_price:
+                value = round(price * qty, 2)
+                total_value += value
+                price_display = f"${price:,.2f}"
+                value_display = f"${value:,.2f}"
+            else:
+                price_display = "N/A"
+                value_display = "N/A"
+
+            items.append((h.ticker, qty, price_display, value_display))
+
+        # PDF generation
+        buffer = BytesIO()
+        c = canvas.Canvas(buffer, pagesize=letter)
+        width, height = letter
+
+        c.setFont("Helvetica-Bold", 16)
+        c.drawString(40, height - 40, "Financial Analyst Assistant - Portfolio Report")
+        c.setFont("Helvetica", 10)
+        c.drawString(40, height - 60, f"Generated: {datetime.now(UTC):%Y-%m-%d %H:%M:%S UTC}")
+        c.drawString(40, height - 75, f"Total Value: ${total_value:,.2f}")
+
+        y = height - 110
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(40, y, "Ticker")
+        c.drawString(140, y, "Quantity")
+        c.drawString(240, y, "Price")
+        c.drawString(340, y, "Value")
+
+        y -= 18
+        c.setFont("Helvetica", 10)
+        for t, q, p_display, v_display in items:
+            if y < 80:
+                c.showPage()
+                y = height - 60
+            c.drawString(40, y, str(t))
+            c.drawString(140, y, str(q))
+            c.drawString(240, y, str(p_display))
+            c.drawString(340, y, str(v_display))
+            y -= 16
+
+        c.showPage()
+        c.save()
+        buffer.seek(0)
+        return send_file(buffer, mimetype="application/pdf", as_attachment=True, download_name="portfolio_report.pdf")
+
+    except Exception as e:
+        traceback.print_exc()
+        return f"Failed to generate report: {e}", 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=PORT, debug=True)
